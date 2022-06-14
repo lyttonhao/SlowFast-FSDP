@@ -32,7 +32,7 @@ def build_model(cfg, gpu_id=None):
     """
     if torch.cuda.is_available():
         assert (
-            cfg.NUM_GPUS <= torch.cuda.device_count()
+            min(cfg.NUM_GPUS, cfg.MAX_GPUS_PER_NODE) <= torch.cuda.device_count()
         ), "Cannot use more GPU devices than available"
     else:
         assert (

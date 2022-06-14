@@ -12,6 +12,7 @@ from . import custom_config
 # Config definition
 # -----------------------------------------------------------------------------
 _C = CfgNode()
+cfg = _C
 
 # -----------------------------------------------------------------------------
 # Contrastive Model (for MoCo, SimCLR, SwAV, BYOL)
@@ -730,6 +731,9 @@ _C.TASK = ""
 # Number of GPUs to use (applies to both training and testing).
 _C.NUM_GPUS = 1
 
+# Maximum number of GPUs available per node (unlikely to need to be changed)
+_C.MAX_GPUS_PER_NODE = 8
+
 # Number of machine to use for the job.
 _C.NUM_SHARDS = 1
 
@@ -751,6 +755,10 @@ _C.LOG_MODEL_INFO = True
 
 # Distributed backend.
 _C.DIST_BACKEND = "nccl"
+
+# Hostname and port range for multi-process groups (actual port selected randomly)
+_C.HOST = "localhost"
+_C.PORT_RANGE = [10000, 65000]
 
 # ---------------------------------------------------------------------------- #
 # Benchmark options
@@ -1008,6 +1016,27 @@ _C.TENSORBOARD.WRONG_PRED_VIS.TAG = "Incorrectly classified videos."
 # within this subset is visualized.
 _C.TENSORBOARD.WRONG_PRED_VIS.SUBSET_PATH = ""
 
+# ---------------------------------- Launch options ---------------------------------- #
+_C.LAUNCH = CfgNode()
+
+# The launch mode, may be 'local' or 'slurm' (or 'submitit_local' for debugging)
+# The 'local' mode uses a multi-GPU setup via torch.multiprocessing.run_processes.
+# The 'slurm' mode uses submitit to launch a job on a SLURM cluster and provides
+# support for MULTI-NODE jobs (and is the only way to launch MULTI-NODE jobs).
+# In 'slurm' mode, the LAUNCH options below can be used to control the SLURM options.
+# Note that NUM_GPUS (not part of LAUNCH options) determines total GPUs requested.
+_C.LAUNCH.MODE = "local"
+
+# Launch options that are only used if LAUNCH.MODE is 'slurm'
+_C.LAUNCH.MAX_RETRY = 3
+_C.LAUNCH.NAME = "pyslowfast_job"
+_C.LAUNCH.COMMENT = ""
+_C.LAUNCH.CPUS_PER_GPU = 10
+_C.LAUNCH.MEM_PER_GPU = 60
+_C.LAUNCH.PARTITION = "devlab"
+_C.LAUNCH.GPU_TYPE = "volta"
+_C.LAUNCH.TIME_LIMIT = 4200
+_C.LAUNCH.EMAIL = ""
 
 # ---------------------------------------------------------------------------- #
 # Demo options
