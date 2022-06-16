@@ -6,8 +6,10 @@ import logging
 import math
 import numpy as np
 import os
+import random
 from datetime import datetime
 import psutil
+import submitit
 import torch
 from fvcore.nn.activation_count import activation_count
 from fvcore.nn.flop_count import flop_count
@@ -19,9 +21,31 @@ import slowfast.utils.multiprocessing as mpu
 from slowfast.datasets.utils import pack_pathway_output
 from slowfast.models.batchnorm_helper import SubBatchNorm3d
 from slowfast.utils.env import pathmgr
+from slowfast.config.defaults import cfg
 
 logger = logging.get_logger(__name__)
 
+# Make work w recent PyTorch versions (https://github.com/pytorch/pytorch/issues/37377)
+os.environ["MKL_THREADING_LAYER"] = "GNU"
+
+
+class SubmititRunner(submitit.helpers.Checkpointable):
+    """A callable which is passed to submitit to launch the jobs."""
+
+    def __init__(self, port, fun, cfg_state):
+        self.cfg_state = cfg_state
+        self.port = port
+        self.fun = fun
+
+    def __call__(self):
+        job_env = submitit.JobEnvironment()
+        os.environ["MASTER_ADDR"] = job_env.hostnames[0]
+        os.environ["MASTER_PORT"] = str(self.port)
+        os.environ["RANK"] = str(job_env.global_rank)
+        os.environ["LOCAL_RANK"] = str(job_env.local_rank)
+        os.environ["WORLD_SIZE"] = str(job_env.num_tasks)
+        setup_distributed(self.cfg_state)
+        self.fun(self.cfg_state)
 
 def check_nan_losses(loss):
     """
@@ -279,6 +303,22 @@ def aggregate_sub_bn_stats(module):
             count += aggregate_sub_bn_stats(child)
     return count
 
+def setup_distributed(cfg_state):
+    """
+    Initialize torch.distributed and set the CUDA device.
+
+    Expects environment variables to be set as per
+    https://pytorch.org/docs/stable/distributed.html#environment-variable-initialization
+    along with the environ variable "LOCAL_RANK" which is used to set the CUDA device.
+
+    This is run inside a new process, so the cfg is reset and must be set explicitly.
+    """
+    cfg.defrost()
+    cfg.update(**cfg_state)
+    cfg.freeze()
+    local_rank = int(os.environ["LOCAL_RANK"])
+    torch.distributed.init_process_group(backend=cfg.DIST_BACKEND)
+    torch.cuda.set_device(local_rank)
 
 def launch_job(cfg, init_method, func, daemon=False):
     """
@@ -292,7 +332,33 @@ def launch_job(cfg, init_method, func, daemon=False):
         daemon (bool): The spawned processes’ daemon flag. If set to True,
             daemonic processes will be created
     """
-    if cfg.NUM_GPUS > 1:
+    launch = cfg.LAUNCH
+    if launch.MODE in ["submitit_local", "slurm"]:
+        # Launch fun() using submitit either locally or on SLURM
+        use_slurm = launch.MODE == "slurm"
+        executor = submitit.AutoExecutor if use_slurm else submitit.LocalExecutor
+        kwargs = {"slurm_max_num_timeout": launch.MAX_RETRY} if use_slurm else {}
+        executor = executor(folder=cfg.OUTPUT_DIR, **kwargs)
+        num_gpus_per_node = min(cfg.NUM_GPUS, cfg.MAX_GPUS_PER_NODE)
+        executor.update_parameters(
+            mem_gb=launch.MEM_PER_GPU * num_gpus_per_node,
+            gpus_per_node=num_gpus_per_node,
+            tasks_per_node=num_gpus_per_node,
+            cpus_per_task=launch.CPUS_PER_GPU,
+            nodes=max(1, cfg.NUM_GPUS // cfg.MAX_GPUS_PER_NODE),
+            timeout_min=launch.TIME_LIMIT,
+            name=launch.NAME,
+            slurm_partition=launch.PARTITION,
+            slurm_comment=launch.COMMENT,
+            slurm_constraint=launch.GPU_TYPE,
+            slurm_additional_parameters={"mail-user": launch.EMAIL, "mail-type": "END"},
+        )
+        main_port = random.randint(cfg.PORT_RANGE[0], cfg.PORT_RANGE[1])
+        job = executor.submit(SubmititRunner(main_port, func, cfg))
+        print("Submitted job_id {} with out_dir: {}".format(job.job_id, cfg.OUTPUT_DIR))
+        if not use_slurm:
+            job.wait()
+    elif cfg.NUM_GPUS > 1:
         torch.multiprocessing.spawn(
             mpu.run,
             nprocs=cfg.NUM_GPUS,
