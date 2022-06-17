@@ -731,9 +731,6 @@ _C.TASK = ""
 # Number of GPUs to use (applies to both training and testing).
 _C.NUM_GPUS = 1
 
-# Maximum number of GPUs available per node (unlikely to need to be changed)
-_C.MAX_GPUS_PER_NODE = 8
-
 # Number of machine to use for the job.
 _C.NUM_SHARDS = 1
 
