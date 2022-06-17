@@ -339,13 +339,13 @@ def launch_job(cfg, init_method, func, daemon=False):
         executor = submitit.AutoExecutor if use_slurm else submitit.LocalExecutor
         kwargs = {"slurm_max_num_timeout": launch.MAX_RETRY} if use_slurm else {}
         executor = executor(folder=cfg.OUTPUT_DIR, **kwargs)
-        num_gpus_per_node = min(cfg.NUM_GPUS, cfg.MAX_GPUS_PER_NODE)
+        num_gpus_per_node = cfg.NUM_GPUS
         executor.update_parameters(
             mem_gb=launch.MEM_PER_GPU * num_gpus_per_node,
             gpus_per_node=num_gpus_per_node,
             tasks_per_node=num_gpus_per_node,
             cpus_per_task=launch.CPUS_PER_GPU,
-            nodes=max(1, cfg.NUM_GPUS // cfg.MAX_GPUS_PER_NODE),
+            nodes=cfg.NUM_SHARDS,
             timeout_min=launch.TIME_LIMIT,
             name=launch.NAME,
             slurm_partition=launch.PARTITION,

@@ -3,7 +3,7 @@ TRAIN:
   DATASET: kinetics
   BATCH_SIZE: 64
   EVAL_PERIOD: 10
-  CHECKPOINT_PERIOD: 1
+  CHECKPOINT_PERIOD: 10
   AUTO_RESUME: True
 DATA:
   NUM_FRAMES: 8
@@ -31,6 +31,7 @@ BN:
   USE_PRECISE_STATS: True
   NUM_BATCHES_PRECISE: 200
 SOLVER:
+  BASE_LR_SCALE_NUM_SHARDS: True
   BASE_LR: 0.1
   LR_POLICY: cosine
   MAX_EPOCH: 196
@@ -52,10 +53,10 @@ TEST:
 DATA_LOADER:
   NUM_WORKERS: 8
   PIN_MEMORY: True
-NUM_GPUS: 64
+NUM_GPUS: 8
 NUM_SHARDS: 1
 RNG_SEED: 0
-OUTPUT_DIR: /checkpoint/shoubhikdn/pyslowfast/submitit_64
+OUTPUT_DIR: /checkpoint/lyttonhao/pyslowfast/submitit_64
 LAUNCH:
   MODE: slurm
   PARTITION: learnlab,learnfair
