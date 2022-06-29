@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
 
+import os
 import av
+import decord as de
+de.bridge.set_bridge('torch')
 
+import torch
 
-def get_video_container(path_to_vid, multi_thread_decode=False, backend="pyav"):
+def get_video_container(path_to_vid, multi_thread_decode=False, backend="pyav", device = 'cpu'):
     """
     Given the path to the video, return the pyav video container.
     Args:
@@ -24,6 +28,17 @@ def get_video_container(path_to_vid, multi_thread_decode=False, backend="pyav"):
         if multi_thread_decode:
             # Enable multiple threads for decoding.
             container.streams.video[0].thread_type = "AUTO"
+        return container
+    elif backend == "decord":
+        worker_id = torch.utils.data.get_worker_info().id
+        if device == 'cpu':
+            NUM_CPUS = os.cpu_count()
+            ctx = de.cpu(worker_id % NUM_CPUS)
+        else:
+            #NOTE: Install decord from source to support GPU acceleration. Requires some apt pkgs !
+            MAX_GPUS_PER_NODE = torch.cuda.device_count()
+            ctx = de.gpu(worker_id % MAX_GPUS_PER_NODE)
+        container = de.VideoReader(path_to_vid, ctx = ctx)
         return container
     else:
         raise NotImplementedError("Unknown backend {}".format(backend))
