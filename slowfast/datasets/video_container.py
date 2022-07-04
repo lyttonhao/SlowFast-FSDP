@@ -10,12 +10,13 @@ import torch
 
 def get_video_container(path_to_vid, multi_thread_decode=False, backend="pyav", device = 'cpu'):
     """
-    Given the path to the video, return the pyav video container.
+    Given the path to the video, return the backend video container.
     Args:
         path_to_vid (str): path to the video.
-        multi_thread_decode (bool): if True, perform multi-thread decoding.
-        backend (str): decoder backend, options include `pyav` and
-            `torchvision`, default is `pyav`.
+        multi_thread_decode (bool): if True, perform multi-thread decoding if supported.
+        backend (str): decoder backend, options include `pyav`, 
+            `torchvision`, and `decord`. default is `pyav`.
+        device (str): decoding device. Options are `cpu` or `gpu`(if supported)
     Returns:
         container (container): video container.
     """
