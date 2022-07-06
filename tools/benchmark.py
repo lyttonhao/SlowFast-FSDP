@@ -14,11 +14,12 @@ logger = logging.get_logger(__name__)
 
 def main():
     args = parse_args()
-    cfg = load_config(args)
-
-    launch_job(
-        cfg=cfg, init_method=args.init_method, func=benchmark_data_loading
-    )
+    for path_to_config in args.cfg_files:
+        
+        cfg = load_config(args, path_to_config)
+        launch_job(
+            cfg=cfg, init_method=args.init_method, func=benchmark_data_loading
+        )
 
 
 if __name__ == "__main__":
