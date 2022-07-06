@@ -8,6 +8,7 @@ from fvcore.common.registry import Registry
 from torch.distributed.algorithms.ddp_comm_hooks import (
     default as comm_hooks_default,
 )
+from fairscale.nn.data_parallel import FullyShardedDataParallel as FSDP
 
 import slowfast.utils.logging as logging
 
@@ -65,20 +66,24 @@ def build_model(cfg, gpu_id=None):
             cur_device = gpu_id
         # Transfer the model to the current GPU device
         model = model.cuda(device=cur_device)
+
     # Use multi-process data parallel model in the multi-gpu setting
     if cfg.NUM_GPUS > 1:
+        if(cfg.FSDP.ENABLED):
+            model = FSDP(model, reshard_after_forward = cfg.FSDP.RESHARD_AFTER_FW, mixed_precision=cfg.TRAIN.MIXED_PRECISION)
+        else:
         # Make model replica operate on the current device
-        model = torch.nn.parallel.DistributedDataParallel(
-            module=model,
-            device_ids=[cur_device],
-            output_device=cur_device,
-            find_unused_parameters=True
-            if cfg.MODEL.DETACH_FINAL_FC
-            or cfg.MODEL.MODEL_NAME == "ContrastiveModel"
-            else False,
-        )
-        if cfg.MODEL.FP16_ALLREDUCE:
-            model.register_comm_hook(
-                state=None, hook=comm_hooks_default.fp16_compress_hook
+            model = torch.nn.parallel.DistributedDataParallel(
+                module=model,
+                device_ids=[cur_device],
+                output_device=cur_device,
+                find_unused_parameters=True
+                if cfg.MODEL.DETACH_FINAL_FC
+                or cfg.MODEL.MODEL_NAME == "ContrastiveModel"
+                else False,
             )
+            if cfg.MODEL.FP16_ALLREDUCE:
+                model.register_comm_hook(
+                    state=None, hook=comm_hooks_default.fp16_compress_hook
+                )
     return model
