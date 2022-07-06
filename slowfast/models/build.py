@@ -11,6 +11,8 @@ from torch.distributed.algorithms.ddp_comm_hooks import (
 from fairscale.nn.data_parallel import FullyShardedDataParallel as FSDP
 
 import slowfast.utils.logging as logging
+import slowfast.utils.misc as misc
+
 
 logger = logging.get_logger(__name__)
 
@@ -66,6 +68,10 @@ def build_model(cfg, gpu_id=None):
             cur_device = gpu_id
         # Transfer the model to the current GPU device
         model = model.cuda(device=cur_device)
+    
+    #NOTE: jit Analysis doesn't supprt FSDP wrapped model. Logger is before wrapping
+    if cfg.LOG_MODEL_INFO:
+        misc.log_model_info(model, cfg, use_train_input=True)
 
     # Use multi-process data parallel model in the multi-gpu setting
     if cfg.NUM_GPUS > 1:
