@@ -33,12 +33,12 @@ def get_video_container(path_to_vid, multi_thread_decode=False, backend="pyav", 
     elif backend == "decord":
         worker_id = torch.utils.data.get_worker_info().id
         if device == 'cpu':
-            NUM_CPUS = os.cpu_count()
-            ctx = de.cpu(worker_id % NUM_CPUS)
+            num_cpus = os.cpu_count()
+            ctx = de.cpu(worker_id % num_cpus)
         else:
             #NOTE: Install decord from source to support GPU acceleration. Requires some apt pkgs !
-            MAX_GPUS_PER_NODE = torch.cuda.device_count()
-            ctx = de.gpu(worker_id % MAX_GPUS_PER_NODE)
+            max_gpus_per_node = torch.cuda.device_count()
+            ctx = de.gpu(worker_id % max_gpus_per_node)
         container = de.VideoReader(path_to_vid, ctx = ctx)
         return container
     else:
