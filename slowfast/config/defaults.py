@@ -511,6 +511,16 @@ _C.SLOWFAST.FUSION_KERNEL_SZ = 5
 
 
 # -----------------------------------------------------------------------------
+# FSDP options
+# -----------------------------------------------------------------------------
+_C.FSDP = CfgNode()
+# Enable Fully Sharded Data Parallel Model.
+_C.FSDP.ENABLED = False
+# Enable resharding after the FW pass. This saves memory but tradesoff communication.
+_C.FSDP.RESHARD_AFTER_FW = False
+
+
+# -----------------------------------------------------------------------------
 # Data options
 # -----------------------------------------------------------------------------
 _C.DATA = CfgNode()
