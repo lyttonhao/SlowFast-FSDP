@@ -4,6 +4,7 @@
 import logging
 import math
 import random
+from typing import List
 
 import numpy as np
 import torch
@@ -463,6 +464,69 @@ def pyav_decode(
     return frames_out, fps, decode_all_video, start_end_delta_time
 
 
+def decord_decode(
+    video_reader,
+    sampling_rate : List[int],
+    num_frames : List[int],
+    clip_idx : int,
+    num_clips_uniform : int = 10,
+    target_fps : int = 30,
+    min_delta : int = -math.inf,
+    max_delta : int = math.inf
+): 
+    """
+    Convert the video from its original fps to the target_fps,
+    then perform temporal selective decoding and sample a clip from the video
+    with the decord decoder. If the video does not support selective decoding,
+    decode the entire video.
+
+    Args:
+        video_reader (container): decord VideoReader.
+        sampling_rate (int): frame sampling rate (interval between two sampled
+            frames.
+        num_frames (int): number of frames to sample.
+        clip_idx (int): if clip_idx is -1, perform random temporal sampling. If
+            clip_idx is larger than -1, uniformly split the video to num_clips_uniform
+            clips, and select the clip_idx-th video clip.
+        num_clips_uniform (int): overall number of clips to uniformly sample from the
+            given video.
+        target_fps (int): the input video may has different fps, convert it to
+            the target video fps before frame sampling.
+        min_delta (int): minimum distance between clips when sampling multiple.
+        max_delta (int): max distance between clips when sampling multiple.
+    Returns:
+        frames (tensor): decoded frames from the video.
+        fps (float): the number of frames per second of the video.
+        decode_all_video (bool): If True, the entire video was decoded.
+        start_end_delta_time (List) : contains start and end times of each sampled clip
+    """
+    decode_all_video = False
+    fps = video_reader.get_avg_fps()
+    n_video_frames = len(video_reader)
+    clip_sizes = np.maximum(
+                    1.0,
+                    np.ceil(np.array(sampling_rate) * (np.array(num_frames) - 1) * (fps / target_fps))
+                    ).astype(np.int)
+    frames_out = [None] * len(num_frames)
+    start_end_delta_time = get_multiple_start_end_idx(n_video_frames,
+                            clip_sizes,
+                            clip_idx,
+                            num_clips_uniform,
+                            min_delta=min_delta,
+                            max_delta=max_delta)
+    for f_idx in range(len(num_frames)):
+        if(clip_sizes[f_idx] <= n_video_frames):
+            start_idx, end_idx = (start_end_delta_time[f_idx,0], start_end_delta_time[f_idx,1])
+        else:
+            end_idx = len(video_reader)
+
+        frames_idx = np.arange(int(start_idx), int(end_idx)).astype(np.int)
+        frames = video_reader.get_batch(frames_idx)
+        frames_out[f_idx] = frames
+    return frames_out, fps, decode_all_video, start_end_delta_time
+
+
+
 def decode(
     container,
     sampling_rate,
@@ -555,6 +619,23 @@ def decode(
                 min_delta=min_delta,
                 max_delta=max_delta,
             )
+        elif backend == "decord":
+            (
+                frames_decoded,
+                fps,
+                decode_all_video,
+                start_end_delta_time,
+            ) = decord_decode(
+                container,
+                sampling_rate,
+                num_frames,
+                clip_idx,
+                num_clips_uniform,
+                target_fps,
+                min_delta=min_delta,
+                max_delta=max_delta,
+                )
+            
         else:
             raise NotImplementedError(
                 "Unknown decoding backend {}".format(backend)
