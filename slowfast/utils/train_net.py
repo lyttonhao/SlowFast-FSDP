@@ -23,6 +23,8 @@ from slowfast.models import build_model
 from slowfast.models.contrastive import cancel_swav_gradients
 from slowfast.utils.meters import AVAMeter, EpochTimer, TrainMeter, ValMeter
 from slowfast.utils.multigrid import MultigridSchedule
+from fairscale.optim.grad_scaler import ShardedGradScaler
+
 
 logger = logging.get_logger(__name__)
 
@@ -572,8 +574,11 @@ def train(cfg):
 
     # Construct the optimizer.
     optimizer = optim.construct_optimizer(model, cfg)
+    if(cfg.FSDP.ENABLED):
+        scaler = ShardedGradScaler(enabled=cfg.TRAIN.MIXED_PRECISION)
+    else:
     # Create a GradScaler for mixed precision training
-    scaler = torch.cuda.amp.GradScaler(enabled=cfg.TRAIN.MIXED_PRECISION)
+        scaler = torch.cuda.amp.GradScaler(enabled=cfg.TRAIN.MIXED_PRECISION)
 
     # Load a checkpoint to resume training if applicable.
     if cfg.TRAIN.AUTO_RESUME and cu.has_checkpoint(cfg.OUTPUT_DIR):
