@@ -76,7 +76,11 @@ def build_model(cfg, gpu_id=None):
     # Use multi-process data parallel model in the multi-gpu setting
     if cfg.NUM_GPUS > 1:
         if(cfg.FSDP.ENABLED):
-            model = FSDP(model, reshard_after_forward = cfg.FSDP.RESHARD_AFTER_FW, mixed_precision=cfg.TRAIN.MIXED_PRECISION)
+            model = FSDP(
+                model, 
+                reshard_after_forward = cfg.FSDP.RESHARD_AFTER_FW, 
+                mixed_precision=cfg.TRAIN.MIXED_PRECISION,
+            )
         else:
         # Make model replica operate on the current device
             model = torch.nn.parallel.DistributedDataParallel(

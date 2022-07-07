@@ -121,15 +121,12 @@ def save_checkpoint(path_to_job, model, optimizer, epoch, cfg, scaler=None):
         cfg (CfgNode): configs to save.
         scaler (GradScaler): the mixed precision scale.
     """
-    # Save checkpoints only from the master process.
-    if not du.is_master_proc(cfg.NUM_GPUS * cfg.NUM_SHARDS):
-        return
     # Ensure that the checkpoint dir exists.
     pathmgr.mkdirs(get_checkpoint_dir(path_to_job))
     # Omit the DDP wrapper in the multi-gpu setting.
-    sd = model.module.state_dict() if cfg.NUM_GPUS > 1 else model.state_dict()
+    ddp_wrapped =  isinstance(model, torch.nn.parallel.DistributedDataParallel)
+    sd = model.module.state_dict() if ddp_wrapped else model.state_dict()
     normalized_sd = sub_to_normal_bn(sd)
-
     # Record the state.
     checkpoint = {
         "epoch": epoch,
@@ -139,6 +136,11 @@ def save_checkpoint(path_to_job, model, optimizer, epoch, cfg, scaler=None):
     }
     if scaler is not None:
         checkpoint["scaler_state"] = scaler.state_dict()
+
+    # Save checkpoints only from the master process.
+    #NOTE: For FSDP, all ranks have to call model.state_dict() for synchronization
+    if not du.is_master_proc(cfg.NUM_GPUS * cfg.NUM_SHARDS):
+        return
     # Write the checkpoint.
     path_to_checkpoint = get_path_to_checkpoint(
         path_to_job, epoch + 1, cfg.TASK
