@@ -69,7 +69,7 @@ def build_model(cfg, gpu_id=None):
         # Transfer the model to the current GPU device
         model = model.cuda(device=cur_device)
     
-    #NOTE: jit Analysis doesn't supprt FSDP wrapped model. Logger is before wrapping
+    #NOTE: jit Analysis doesn't supprt FSDP wrapped model. Logging is done before wrapping
     if cfg.LOG_MODEL_INFO:
         misc.log_model_info(model, cfg, use_train_input=True)
 
