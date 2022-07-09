@@ -12,6 +12,7 @@ from fairscale.nn.data_parallel import FullyShardedDataParallel as FSDP
 
 import slowfast.utils.logging as logging
 import slowfast.utils.misc as misc
+import slowfast.utils.distributed as du
 
 
 logger = logging.get_logger(__name__)
@@ -70,7 +71,7 @@ def build_model(cfg, gpu_id=None):
         model = model.cuda(device=cur_device)
     
     #NOTE: jit Analysis doesn't supprt FSDP wrapped model. Logging is done before wrapping
-    if cfg.LOG_MODEL_INFO:
+    if du.is_master_proc() and cfg.LOG_MODEL_INFO:
         misc.log_model_info(model, cfg, use_train_input=True)
 
     # Use multi-process data parallel model in the multi-gpu setting
