@@ -54,10 +54,15 @@ DATA_LOADER:
   NUM_WORKERS: 8
   PIN_MEMORY: True
 NUM_GPUS: 8
-NUM_SHARDS: 1
+NUM_SHARDS: 8
 RNG_SEED: 0
-OUTPUT_DIR: /checkpoint/lyttonhao/pyslowfast/submitit_64
+OUTPUT_DIR: /checkpoint/haithamkhedr/pyslowfast/c2d_fsdp_baseline
 LAUNCH:
   MODE: slurm
   PARTITION: learnlab,learnfair
   GPU_TYPE: "volta32gb"
+TENSORBOARD:
+  ENABLE: True
+FSDP:
+  ENABLED: True
+  RESHARD_AFTER_FW: False

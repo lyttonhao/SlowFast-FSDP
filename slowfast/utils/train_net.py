@@ -23,6 +23,8 @@ from slowfast.models import build_model
 from slowfast.models.contrastive import cancel_swav_gradients
 from slowfast.utils.meters import AVAMeter, EpochTimer, TrainMeter, ValMeter
 from slowfast.utils.multigrid import MultigridSchedule
+from fairscale.optim.grad_scaler import ShardedGradScaler
+
 
 logger = logging.get_logger(__name__)
 
@@ -567,23 +569,25 @@ def train(cfg):
 
     # Build the video model and print model statistics.
     model = build_model(cfg)
-    if du.is_master_proc() and cfg.LOG_MODEL_INFO:
-        misc.log_model_info(model, cfg, use_train_input=True)
 
     # Construct the optimizer.
     optimizer = optim.construct_optimizer(model, cfg)
+    if(cfg.FSDP.ENABLED):
+        scaler = ShardedGradScaler(enabled=cfg.TRAIN.MIXED_PRECISION)
+    else:
     # Create a GradScaler for mixed precision training
-    scaler = torch.cuda.amp.GradScaler(enabled=cfg.TRAIN.MIXED_PRECISION)
-
+        scaler = torch.cuda.amp.GradScaler(enabled=cfg.TRAIN.MIXED_PRECISION)
+        
     # Load a checkpoint to resume training if applicable.
     if cfg.TRAIN.AUTO_RESUME and cu.has_checkpoint(cfg.OUTPUT_DIR):
         logger.info("Load from last checkpoint.")
         last_checkpoint = cu.get_last_checkpoint(cfg.OUTPUT_DIR, task=cfg.TASK)
+        ddp_wrapped = isinstance(model, torch.nn.parallel.DistributedDataParallel)
         if last_checkpoint is not None:
             checkpoint_epoch = cu.load_checkpoint(
                 last_checkpoint,
                 model,
-                cfg.NUM_GPUS > 1,
+                ddp_wrapped,
                 optimizer,
                 scaler if cfg.TRAIN.MIXED_PRECISION else None,
             )
@@ -593,7 +597,7 @@ def train(cfg):
             checkpoint_epoch = cu.load_checkpoint(
                 last_checkpoint,
                 model,
-                cfg.NUM_GPUS > 1,
+                ddp_wrapped,
                 optimizer,
                 scaler if cfg.TRAIN.MIXED_PRECISION else None,
                 epoch_reset=True,
