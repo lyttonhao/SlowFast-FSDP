@@ -3,9 +3,10 @@
 
 import logging
 import math
-from typing import List
-import numpy as np
 import random
+from typing import List
+
+import numpy as np
 import torch
 import torchvision.io as io
 
@@ -85,7 +86,6 @@ def get_multiple_start_end_idx(
     num_clips_uniform,
     min_delta=0,
     max_delta=math.inf,
-    use_offset=False
 ):
     """
     Sample a clip of size clip_size from a video of size video_size and
@@ -115,28 +115,20 @@ def get_multiple_start_end_idx(
         min_delta=0,
         max_delta=math.inf,
         num_retries=100,
-        use_offset=False
     ):
         se_inds = np.empty((0, 2))
         dt = np.empty((0))
         for clip_size in clip_sizes:
             for i_try in range(num_retries):
-                # clip_size = int(clip_size)
+                clip_size = int(clip_size)
                 max_start = max(video_size - clip_size, 0)
                 if clip_idx == -1:
                     # Random temporal sampling.
                     start_idx = random.uniform(0, max_start)
-                else: # Uniformly sample the clip with the given index.
-                    if use_offset:
-                        if num_clips_uniform == 1:
-                            # Take the center clip if num_clips is 1.
-                            start_idx = math.floor(max_start / 2)
-                        else:
-                            start_idx = clip_idx * math.floor(max_start / (num_clips_uniform - 1))
-                    else:
-                        start_idx = max_start * clip_idx / num_clips_uniform
-
-                end_idx = start_idx + clip_size - 1
+                else:
+                    # Uniformly sample the clip with the given index.
+                    start_idx = max_start * clip_idx / num_clips_uniform
+                end_idx = start_idx + clip_size  #  - 1
 
                 se_inds_new = np.append(se_inds, [[start_idx, end_idx]], axis=0)
                 if se_inds.shape[0] < 1:
@@ -165,7 +157,6 @@ def get_multiple_start_end_idx(
             min_delta,
             max_delta,
             100,
-            use_offset,
         )
         success = not (any(dt < min_delta) or any(dt > max_delta))
         if success or clip_idx != -1:
@@ -305,7 +296,9 @@ def torchvision_decode(
         clip_sizes = [
             np.maximum(
                 1.0,
-                sampling_rate[i] * num_frames[i] / target_fps * fps
+                np.ceil(
+                    sampling_rate[i] * (num_frames[i] - 1) / target_fps * fps
+                ),
             )
             for i in range(len(sampling_rate))
         ]
@@ -316,7 +309,6 @@ def torchvision_decode(
             num_clips_uniform,
             min_delta=min_delta,
             max_delta=max_delta,
-            use_offset=use_offset,
         )
         frames_out = [None] * len(num_frames)
         for k in range(len(num_frames)):
@@ -592,10 +584,9 @@ def decode(
         )  # clips come temporally ordered from decoder
     try:
         if backend == "pyav":
-            assert (
-                min_delta == -math.inf and max_delta == math.inf
-            ), "delta sampling not supported in pyav"
-            frames_decoded, fps, decode_all_video = pyav_decode(
+            assert min_delta == -math.inf and max_delta == math.inf, \
+                "delta sampling not supported in pyav"
+            frames_decoded, fps, decode_all_video, start_end_delta_time = pyav_decode(
                 container,
                 sampling_rate,
                 num_frames,
@@ -661,12 +652,12 @@ def decode(
         frames_decoded = [frames_decoded]
     num_decoded = len(frames_decoded)
     clip_sizes = [
-            np.maximum(
-                1.0,
-                sampling_rate[i] * num_frames[i] / target_fps * fps
-            )
-            for i in range(len(sampling_rate))
-        ]
+        np.maximum(
+            1.0,
+            np.ceil(sampling_rate[i] * (num_frames[i] - 1) / target_fps * fps),
+        )
+        for i in range(len(sampling_rate))
+    ]
 
     if decode_all_video:  # full video was decoded (not trimmed yet)
         assert num_decoded == 1 and start_end_delta_time is None
@@ -677,7 +668,6 @@ def decode(
             num_clips_uniform if decode_all_video else 1,
             min_delta=min_delta,
             max_delta=max_delta,
-            use_offset=use_offset,
         )
 
     frames_out, start_inds, time_diff_aug = (
