@@ -518,7 +518,7 @@ def decord_decode(
         if(clip_sizes[f_idx] <= n_video_frames):
             start_idx, end_idx = (start_end_delta_time[f_idx,0], start_end_delta_time[f_idx,1])
         else:
-            end_idx = len(video_reader)
+            start_idx, end_idx = 0, len(video_reader)
 
         frames_idx = np.arange(int(start_idx), int(end_idx)).astype(np.int)
         frames = video_reader.get_batch(frames_idx)
