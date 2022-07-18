@@ -82,7 +82,7 @@ def gpu_mem_usage():
         mem_usage_bytes = torch.cuda.max_memory_allocated()
     else:
         mem_usage_bytes = 0
-    return mem_usage_bytes / 1024 ** 3
+    return mem_usage_bytes / 1024**3
 
 
 def cpu_mem_usage():
@@ -93,8 +93,8 @@ def cpu_mem_usage():
         total (float): total memory (GB).
     """
     vram = psutil.virtual_memory()
-    usage = (vram.total - vram.available) / 1024 ** 3
-    total = vram.total / 1024 ** 3
+    usage = (vram.total - vram.available) / 1024**3
+    total = vram.total / 1024**3
 
     return usage, total
 
@@ -315,7 +315,7 @@ def setup_distributed(cfg_state):
     """
     cfg.defrost()
     cfg.update(**cfg_state)
-    cfg.freeze()
+    #cfg.freeze()
     local_rank = int(os.environ["LOCAL_RANK"])
     torch.distributed.init_process_group(backend=cfg.DIST_BACKEND)
     torch.cuda.set_device(local_rank)
