@@ -17,6 +17,7 @@ from slowfast.models.utils import (
     round_width,
     validate_checkpoint_wrapper_import,
 )
+from fairscale.nn import wrap
 
 from . import head_helper, resnet_helper, stem_helper
 from .build import MODEL_REGISTRY
@@ -858,7 +859,7 @@ class MViT(nn.Module):
         )
         if cfg.MODEL.ACT_CHECKPOINT:
             patch_embed = checkpoint_wrapper(patch_embed)
-        self.patch_embed = patch_embed
+        self.patch_embed = self._fsdp_wrap(patch_embed)
         self.input_dims = [temporal_size, spatial_size, spatial_size]
         assert self.input_dims[1] == self.input_dims[2]
         self.patch_dims = [
@@ -947,8 +948,7 @@ class MViT(nn.Module):
                     for s in cfg.MVIT.POOL_KV_STRIDE[i][1:]
                 ]
 
-        self.norm_stem = norm_layer(embed_dim) if cfg.MVIT.NORM_STEM else None
-
+        self.norm_stem = self._fsdp_wrap(norm_layer(embed_dim)) if cfg.MVIT.NORM_STEM else None
         input_size = self.patch_dims
         self.blocks = nn.ModuleList()
 
@@ -995,6 +995,7 @@ class MViT(nn.Module):
             )
             if cfg.MODEL.ACT_CHECKPOINT:
                 attention_block = checkpoint_wrapper(attention_block)
+            attention_block = self._fsdp_wrap(attention_block)
             self.blocks.append(attention_block)
 
             if len(stride_q[i]) > 0:
@@ -1004,6 +1005,7 @@ class MViT(nn.Module):
                 ]
             embed_dim = dim_out
         self.norm = norm_layer(embed_dim)
+        self.norm = self._fsdp_wrap(self.norm)
 
         self.head = head_helper.TransformerBasicHead(
             embed_dim,
@@ -1012,6 +1014,7 @@ class MViT(nn.Module):
             act_func=cfg.MODEL.HEAD_ACT,
             cfg=cfg,
         )
+        self.head = self._fsdp_wrap(self.head)
         if self.use_abs_pos:
             if self.sep_pos_embed:
                 trunc_normal_(self.pos_embed_spatial, std=0.02)
@@ -1080,6 +1083,29 @@ class MViT(nn.Module):
             pos_embed = torch.cat((cls_pos_embed, pos_embed), dim=1)
 
         return pos_embed
+
+    def _fsdp_wrap(self, module, **kwargs):
+        """
+        Wraps the module with FSDP wrapper *only if*
+        1-FSDP is enabled
+        2-Nested Wrapping is enabled
+        3-Num of module's parameters  >= configured value
+        otherwise returns the unwrapped module
+
+        Args:
+            module: module to be wrapped by FSDP if it is enabled
+            kwargs: config containing FSDP wrapping params
+
+        Return:
+            wrapped_module: FSDP wrapped module
+        """
+        wrapped_module = module
+        if self.cfg.FSDP.ENABLED and self.cfg.FSDP.NESTED_WRAP:
+            min_num_params = self.cfg.FSDP.MIN_PARAMS_TO_WRAP
+            num_params = sum(p.numel() for p in module.parameters())
+            fsdp_wrap = (min_num_params <= num_params)
+            wrapped_module = wrap(module, **kwargs) if fsdp_wrap else module
+        return wrapped_module
 
     def forward(self, x):
         x = x[0]

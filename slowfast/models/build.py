@@ -3,6 +3,7 @@
 
 """Model construction functions."""
 
+import functools
 import torch
 from fvcore.common.registry import Registry
 from torch.distributed.algorithms.ddp_comm_hooks import (
@@ -13,6 +14,9 @@ from fairscale.nn.data_parallel import FullyShardedDataParallel as FSDP
 import slowfast.utils.logging as logging
 import slowfast.utils.misc as misc
 import slowfast.utils.distributed as du
+
+from fairscale.nn import auto_wrap, enable_wrap, default_auto_wrap_policy
+
 
 
 logger = logging.get_logger(__name__)
@@ -25,6 +29,91 @@ The registered object will be called with `obj(cfg)`.
 The call should return a `torch.nn.Module` object.
 """
 
+def get_fsdp_params(cfg) -> dict:
+    """
+    Return FSDP params dict (Assumes usage of fairscale FSDP)
+
+    Args:
+        cfg: config containing FSDP wrapping params
+
+    Return:
+        fsdp_params: FSDP params dict
+    """
+    fsdp_params = {}
+    try:
+        fsdp_params['reshard_after_forward'] = cfg.FSDP.RESHARD_AFTER_FW
+        fsdp_params["mixed_precision"] = cfg.TRAIN.MIXED_PRECISION
+    except AttributeError as e:
+        #TODO:Keyerror
+        logger.exception(f"Configuration error: {e}")
+        raise e
+    if cfg.FSDP.AUTO_WRAP:
+        fsdp_params['auto_wrap_policy'] = functools.partial(
+            default_auto_wrap_policy,
+            min_num_params= int(cfg.FSDP.MIN_PARAMS_TO_WRAP)
+        )
+
+    return fsdp_params
+
+
+def fsdp_model(model: torch.nn.Module, cfg:dict , cur_device: torch.device):
+    """
+    Wraps a model with FSDP.
+
+    Args:
+        model: unwrapped torch model
+        cfg: config containing FSDP config params
+        cur_device: The device to which the model should be transfered
+
+    Return:
+        model: FSDP wrapped model
+    """
+    fsdp_params = get_fsdp_params(cfg)
+    if cfg.FSDP.AUTO_WRAP:
+        with enable_wrap(wrapper_cls=FSDP, **fsdp_params):
+            model = auto_wrap(model)
+    elif(cfg.FSDP.NESTED_WRAP):
+        #Delete current model as it'll be rebuilt with manual nested wrapping
+        del model
+        model_name = cfg.MODEL.MODEL_NAME
+        with enable_wrap(wrapper_cls=FSDP, **fsdp_params):
+            model = MODEL_REGISTRY.get(model_name)(cfg)
+
+    model = FSDP(
+            model,
+            reshard_after_forward = cfg.FSDP.RESHARD_AFTER_FW,
+            mixed_precision=cfg.TRAIN.MIXED_PRECISION,
+        )
+    model = model.to(cur_device)
+    return model
+
+def ddp_model(model, cfg, cur_device):
+    """
+    Wraps a model with DDP.
+
+    Args:
+        model: unwrapped torch model
+        cfg: global config
+        cur_device: The device to which the model should be transfered
+
+    Return:
+        model: DDP wrapped model
+    """
+    # Make model replica operate on the current device
+    model = torch.nn.parallel.DistributedDataParallel(
+        module=model,
+        device_ids=[cur_device],
+        output_device=cur_device,
+        find_unused_parameters=True
+        if cfg.MODEL.DETACH_FINAL_FC
+        or cfg.MODEL.MODEL_NAME == "ContrastiveModel"
+        else False,
+    )
+    if cfg.MODEL.FP16_ALLREDUCE:
+        model.register_comm_hook(
+            state=None, hook=comm_hooks_default.fp16_compress_hook
+        )
+    return model
 
 def build_model(cfg, gpu_id=None):
     """
@@ -43,10 +132,16 @@ def build_model(cfg, gpu_id=None):
             cfg.NUM_GPUS == 0
         ), "Cuda is not available. Please set `NUM_GPUS: 0 for running on CPUs."
 
-    # Construct the model
-    name = cfg.MODEL.MODEL_NAME
-    model = MODEL_REGISTRY.get(name)(cfg)
+    cur_device = 'cpu'
+    if cfg.NUM_GPUS:
+        if gpu_id is None:
+            # Determine the GPU used by the current process
+            cur_device = torch.cuda.current_device()
+        else:
+            cur_device = gpu_id
 
+    model_name = cfg.MODEL.MODEL_NAME
+    model = MODEL_REGISTRY.get(model_name)(cfg)
     if cfg.BN.NORM_TYPE == "sync_batchnorm_apex":
         try:
             import apex
@@ -60,41 +155,29 @@ def build_model(cfg, gpu_id=None):
         model = apex.parallel.convert_syncbn_model(
             model, process_group=process_group
         )
-
-    if cfg.NUM_GPUS:
-        if gpu_id is None:
-            # Determine the GPU used by the current process
-            cur_device = torch.cuda.current_device()
+    try:
+        # Transfer the model to the current device
+        model = model.to(device=cur_device)
+    except RuntimeError as e:
+        msg = str(e)
+        if msg.startswith('CUDA out of memory.'):
+            logger.error("Model can't fit in GPU")
+            if not cfg.FSDP.ENABLED:
+                logger.info("Try enabling FSDP for large models")
+                raise e
         else:
-            cur_device = gpu_id
-        # Transfer the model to the current GPU device
-        model = model.cuda(device=cur_device)
-    
+            #Raise Runtime error
+            raise e
+
     #NOTE: jit Analysis doesn't supprt FSDP wrapped model. Logging is done before wrapping
     if du.is_master_proc() and cfg.LOG_MODEL_INFO:
         misc.log_model_info(model, cfg, use_train_input=True)
 
-    # Use multi-process data parallel model in the multi-gpu setting
     if cfg.NUM_GPUS > 1:
-        if(cfg.FSDP.ENABLED):
-            model = FSDP(
-                model, 
-                reshard_after_forward = cfg.FSDP.RESHARD_AFTER_FW, 
-                mixed_precision=cfg.TRAIN.MIXED_PRECISION,
-            )
+        # Use multi-process data parallel model in the multi-gpu setting
+        if cfg.FSDP.ENABLED:
+            model = fsdp_model(model, cfg, cur_device)
         else:
-        # Make model replica operate on the current device
-            model = torch.nn.parallel.DistributedDataParallel(
-                module=model,
-                device_ids=[cur_device],
-                output_device=cur_device,
-                find_unused_parameters=True
-                if cfg.MODEL.DETACH_FINAL_FC
-                or cfg.MODEL.MODEL_NAME == "ContrastiveModel"
-                else False,
-            )
-            if cfg.MODEL.FP16_ALLREDUCE:
-                model.register_comm_hook(
-                    state=None, hook=comm_hooks_default.fp16_compress_hook
-                )
+            model = ddp_model(model, cfg, cur_device)
+
     return model

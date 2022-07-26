@@ -156,7 +156,6 @@ def train_epoch(
 
         # check Nan Loss.
         misc.check_nan_losses(loss)
-
         if perform_backward:
             scaler.scale(loss).backward()
         # Unscales the gradients of optimizer's assigned params in-place
@@ -567,7 +566,7 @@ def train(cfg):
     logger.info("Train with config:")
     logger.info(pprint.pformat(cfg))
 
-    # Build the video model and print model statistics.
+    # Build the model
     model = build_model(cfg)
 
     # Construct the optimizer.
@@ -577,7 +576,7 @@ def train(cfg):
     else:
     # Create a GradScaler for mixed precision training
         scaler = torch.cuda.amp.GradScaler(enabled=cfg.TRAIN.MIXED_PRECISION)
-        
+
     # Load a checkpoint to resume training if applicable.
     if cfg.TRAIN.AUTO_RESUME and cu.has_checkpoint(cfg.OUTPUT_DIR):
         logger.info("Load from last checkpoint.")
