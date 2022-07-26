@@ -5,7 +5,6 @@ import logging
 import math
 import random
 from typing import List
-
 import numpy as np
 import torch
 import torchvision.io as io
@@ -466,14 +465,14 @@ def pyav_decode(
 
 def decord_decode(
     video_reader,
-    sampling_rate : List[int],
-    num_frames : List[int],
-    clip_idx : int,
-    num_clips_uniform : int = 10,
-    target_fps : int = 30,
-    min_delta : int = -math.inf,
-    max_delta : int = math.inf
-): 
+    sampling_rate: List[int],
+    num_frames: List[int],
+    clip_idx: int,
+    num_clips_uniform: int = 10,
+    target_fps: int = 30,
+    min_delta: int = -math.inf,
+    max_delta: int = math.inf
+):
     """
     Convert the video from its original fps to the target_fps,
     then perform temporal selective decoding and sample a clip from the video
@@ -508,15 +507,17 @@ def decord_decode(
                     np.ceil(np.array(sampling_rate) * (np.array(num_frames) - 1) * (fps / target_fps))
                     ).astype(np.int)
     frames_out = [None] * len(num_frames)
-    start_end_delta_time = get_multiple_start_end_idx(n_video_frames,
-                            clip_sizes,
-                            clip_idx,
-                            num_clips_uniform,
-                            min_delta=min_delta,
-                            max_delta=max_delta)
+    start_end_delta_time = get_multiple_start_end_idx(
+        n_video_frames,
+        clip_sizes,
+        clip_idx,
+        num_clips_uniform,
+        min_delta=min_delta,
+        max_delta=max_delta
+    )
     for f_idx in range(len(num_frames)):
         if(clip_sizes[f_idx] <= n_video_frames):
-            start_idx, end_idx = (start_end_delta_time[f_idx,0], start_end_delta_time[f_idx,1])
+            start_idx, end_idx = (start_end_delta_time[f_idx, 0], start_end_delta_time[f_idx, 1])
         else:
             start_idx, end_idx = 0, len(video_reader)
 
@@ -524,7 +525,6 @@ def decord_decode(
         frames = video_reader.get_batch(frames_idx)
         frames_out[f_idx] = frames
     return frames_out, fps, decode_all_video, start_end_delta_time
-
 
 
 def decode(
@@ -635,7 +635,7 @@ def decode(
                 min_delta=min_delta,
                 max_delta=max_delta,
                 )
-            
+
         else:
             raise NotImplementedError(
                 "Unknown decoding backend {}".format(backend)
