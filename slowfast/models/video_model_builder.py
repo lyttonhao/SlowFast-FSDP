@@ -859,6 +859,7 @@ class MViT(nn.Module):
         )
         if cfg.MODEL.ACT_CHECKPOINT:
             patch_embed = checkpoint_wrapper(patch_embed)
+        patch_embed.apply(self._init_weights)
         self.patch_embed = self._fsdp_wrap(patch_embed)
         self.input_dims = [temporal_size, spatial_size, spatial_size]
         assert self.input_dims[1] == self.input_dims[2]
@@ -947,8 +948,12 @@ class MViT(nn.Module):
                     s + 1 if s > 1 else s
                     for s in cfg.MVIT.POOL_KV_STRIDE[i][1:]
                 ]
+        self.norm_stem = None
+        if cfg.MVIT.NORM_STEM:
+            norm_stem = norm_layer(embed_dim)
+            norm_stem.apply(self._init_weights)
+            self.norm_stem = self._fsdp_wrap(norm_stem)
 
-        self.norm_stem = self._fsdp_wrap(norm_layer(embed_dim)) if cfg.MVIT.NORM_STEM else None
         input_size = self.patch_dims
         self.blocks = nn.ModuleList()
 
@@ -995,6 +1000,7 @@ class MViT(nn.Module):
             )
             if cfg.MODEL.ACT_CHECKPOINT:
                 attention_block = checkpoint_wrapper(attention_block)
+            attention_block.apply(self._init_weights)
             attention_block = self._fsdp_wrap(attention_block)
             self.blocks.append(attention_block)
 
@@ -1005,6 +1011,7 @@ class MViT(nn.Module):
                 ]
             embed_dim = dim_out
         self.norm = norm_layer(embed_dim)
+        self.norm.apply(self._init_weights)
         self.norm = self._fsdp_wrap(self.norm)
 
         self.head = head_helper.TransformerBasicHead(
@@ -1014,6 +1021,7 @@ class MViT(nn.Module):
             act_func=cfg.MODEL.HEAD_ACT,
             cfg=cfg,
         )
+        self.head.apply(self._init_weights)
         self.head = self._fsdp_wrap(self.head)
         if self.use_abs_pos:
             if self.sep_pos_embed:
@@ -1025,7 +1033,7 @@ class MViT(nn.Module):
                 trunc_normal_(self.pos_embed, std=0.02)
         if self.cls_embed_on:
             trunc_normal_(self.cls_token, std=0.02)
-        self.apply(self._init_weights)
+
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
