@@ -10,14 +10,11 @@ from torch.distributed.algorithms.ddp_comm_hooks import (
     default as comm_hooks_default,
 )
 from fairscale.nn.data_parallel import FullyShardedDataParallel as FSDP
+from fairscale.nn import auto_wrap, enable_wrap, default_auto_wrap_policy
 
 import slowfast.utils.logging as logging
 import slowfast.utils.misc as misc
 import slowfast.utils.distributed as du
-
-from fairscale.nn import auto_wrap, enable_wrap, default_auto_wrap_policy
-
-
 
 logger = logging.get_logger(__name__)
 
@@ -28,6 +25,7 @@ Registry for video model.
 The registered object will be called with `obj(cfg)`.
 The call should return a `torch.nn.Module` object.
 """
+
 
 def get_fsdp_params(cfg) -> dict:
     """
@@ -44,19 +42,18 @@ def get_fsdp_params(cfg) -> dict:
         fsdp_params['reshard_after_forward'] = cfg.FSDP.RESHARD_AFTER_FW
         fsdp_params["mixed_precision"] = cfg.TRAIN.MIXED_PRECISION
     except AttributeError as e:
-        #TODO:Keyerror
         logger.exception(f"Configuration error: {e}")
         raise e
     if cfg.FSDP.AUTO_WRAP:
         fsdp_params['auto_wrap_policy'] = functools.partial(
             default_auto_wrap_policy,
-            min_num_params= int(cfg.FSDP.MIN_PARAMS_TO_WRAP)
+            min_num_params=int(cfg.FSDP.MIN_PARAMS_TO_WRAP)
         )
 
     return fsdp_params
 
 
-def fsdp_model(model: torch.nn.Module, cfg:dict , cur_device: torch.device):
+def fsdp_model(model: torch.nn.Module, cfg: dict, cur_device: torch.device):
     """
     Wraps a model with FSDP.
 
@@ -68,24 +65,26 @@ def fsdp_model(model: torch.nn.Module, cfg:dict , cur_device: torch.device):
     Return:
         model: FSDP wrapped model
     """
+    assert not (cfg.FSDP.AUTO_WRAP and cfg.FSDP.NESTED_WRAP), "FSDP mode: select either AUTO_WRAP or NESTED_WRAP"
     fsdp_params = get_fsdp_params(cfg)
+
     if cfg.FSDP.AUTO_WRAP:
         with enable_wrap(wrapper_cls=FSDP, **fsdp_params):
             model = auto_wrap(model)
     elif(cfg.FSDP.NESTED_WRAP):
-        #Delete current model as it'll be rebuilt with manual nested wrapping
-        del model
         model_name = cfg.MODEL.MODEL_NAME
         with enable_wrap(wrapper_cls=FSDP, **fsdp_params):
             model = MODEL_REGISTRY.get(model_name)(cfg)
 
     model = FSDP(
             model,
-            reshard_after_forward = cfg.FSDP.RESHARD_AFTER_FW,
+            reshard_after_forward=cfg.FSDP.RESHARD_AFTER_FW,
             mixed_precision=cfg.TRAIN.MIXED_PRECISION,
         )
-    model = model.to(cur_device)
+
+    model = model.cuda(cur_device)
     return model
+
 
 def ddp_model(model, cfg, cur_device):
     """
@@ -114,6 +113,7 @@ def ddp_model(model, cfg, cur_device):
             state=None, hook=comm_hooks_default.fp16_compress_hook
         )
     return model
+
 
 def build_model(cfg, gpu_id=None):
     """
@@ -155,23 +155,10 @@ def build_model(cfg, gpu_id=None):
         model = apex.parallel.convert_syncbn_model(
             model, process_group=process_group
         )
-    try:
-        # Transfer the model to the current device
-        model = model.to(device=cur_device)
-    except RuntimeError as e:
-        msg = str(e)
-        if msg.startswith('CUDA out of memory.'):
-            logger.error("Model can't fit in GPU")
-            if not cfg.FSDP.ENABLED:
-                logger.info("Try enabling FSDP for large models")
-                raise e
-        else:
-            #Raise Runtime error
-            raise e
 
-    #NOTE: jit Analysis doesn't supprt FSDP wrapped model. Logging is done before wrapping
+    # NOTE: jit analysis will report incorrect FLOPS if activation ckpt is enabled
     if du.is_master_proc() and cfg.LOG_MODEL_INFO:
-        misc.log_model_info(model, cfg, use_train_input=True)
+        misc.log_model_info(model, cfg, use_train_input=True, device='cpu')
 
     if cfg.NUM_GPUS > 1:
         # Use multi-process data parallel model in the multi-gpu setting
