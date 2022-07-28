@@ -127,7 +127,7 @@ def train_epoch(
 
             # Explicitly declare reduction to mean.
             perform_backward = True
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
 
             if cfg.MODEL.MODEL_NAME == "ContrastiveModel":
                 (
@@ -574,7 +574,7 @@ def train(cfg):
     if(cfg.FSDP.ENABLED):
         scaler = ShardedGradScaler(enabled=cfg.TRAIN.MIXED_PRECISION)
     else:
-    # Create a GradScaler for mixed precision training
+        # Create a GradScaler for mixed precision training
         scaler = torch.cuda.amp.GradScaler(enabled=cfg.TRAIN.MIXED_PRECISION)
 
     # Load a checkpoint to resume training if applicable.
