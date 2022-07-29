@@ -74,6 +74,11 @@ def get_last_checkpoint(path_to_job, task):
         return None
     # Sort the checkpoints by epoch.
     name = sorted(names)[-1]
+    # Check if checkpoint is sharded
+    if '_of_' in name:
+        name = '.'.join(name.split('.')[:-1])
+        logger.info(f"Reading sharded checkpoint {name}")
+
     return os.path.join(d, name)
 
 
@@ -121,14 +126,16 @@ def save_checkpoint(path_to_job, model, optimizer, epoch, cfg, scaler=None):
         cfg (CfgNode): configs to save.
         scaler (GradScaler): the mixed precision scale.
     """
+    # Save checkpoints only from the master process.
+    is_sharded = cfg.FSDP.ENABLED
+    if not (du.is_root_proc() or is_sharded):
+        return
     # Ensure that the checkpoint dir exists.
     pathmgr.mkdirs(get_checkpoint_dir(path_to_job))
-    # Omit the DDP wrapper in the multi-gpu setting.
-    ddp_wrapped =  isinstance(model, torch.nn.parallel.DistributedDataParallel)
-    #NOTE: For FSDP, all ranks have to call model.state_dict() for synchronization
-    sd = model.module.state_dict() if ddp_wrapped else model.state_dict()
+
+    sd = get_model_state_dict(model, is_sharded)
     normalized_sd = sub_to_normal_bn(sd)
-    
+
     # Record the state.
     checkpoint = {
         "epoch": epoch,
@@ -139,16 +146,40 @@ def save_checkpoint(path_to_job, model, optimizer, epoch, cfg, scaler=None):
     if scaler is not None:
         checkpoint["scaler_state"] = scaler.state_dict()
 
-    # Save checkpoints only from the master process.
-    if not du.is_master_proc(cfg.NUM_GPUS * cfg.NUM_SHARDS):
-        return
     # Write the checkpoint.
     path_to_checkpoint = get_path_to_checkpoint(
         path_to_job, epoch + 1, cfg.TASK
     )
+    if(is_sharded):
+        rank = du.get_rank()
+        world_size = du.get_world_size()
+        path_to_checkpoint = f"{path_to_checkpoint}.{rank}_of_{world_size}"
+
     with pathmgr.open(path_to_checkpoint, "wb") as f:
         torch.save(checkpoint, f)
+
     return path_to_checkpoint
+
+
+def get_model_state_dict(model: torch.nn.Module, is_sharded: bool):
+    """
+    Returns model state dictionary
+
+    Args:
+        model: torch nn.Module
+        is_sharded: true if FSDP model
+
+    Return:
+        sd: model state dictionary
+    """
+    if(is_sharded):
+        # NOTE: For FSDP, all ranks have to call model.state_dict() for synchronization
+        sd = model.local_state_dict()
+    else:
+        # Omit the DDP wrapper in the multi-gpu setting.
+        ddp_wrapped = isinstance(model, torch.nn.parallel.DistributedDataParallel)
+        sd = model.module.state_dict() if ddp_wrapped else model.state_dict()
+    return sd
 
 
 def inflate_weight(state_dict_2d, state_dict_3d):
@@ -200,6 +231,7 @@ def load_checkpoint(
     convert_from_caffe2=False,
     epoch_reset=False,
     clear_name_pattern=(),
+    is_sharded=False
 ):
     """
     Load the checkpoint from the given file. If inflation is True, inflate the
@@ -294,12 +326,15 @@ def load_checkpoint(
         ms.load_state_dict(state_dict, strict=False)
         epoch = -1
     else:
+        if(is_sharded):
+            rank = du.get_rank()
+            world_size = du.get_world_size()
+            path_to_checkpoint = f"{path_to_checkpoint}.{rank}_of_{world_size}"
         # Load the checkpoint on CPU to avoid GPU mem spike.
         with pathmgr.open(path_to_checkpoint, "rb") as f:
             checkpoint = torch.load(f, map_location="cpu")
-        model_state_dict_3d = (
-            model.module.state_dict() if data_parallel else model.state_dict()
-        )
+
+        model_state_dict_3d = get_model_state_dict(model, is_sharded)
         checkpoint["model_state"] = normal_to_sub_bn(
             checkpoint["model_state"], model_state_dict_3d
         )
@@ -329,7 +364,7 @@ def load_checkpoint(
                     checkpoint["model_state"] = model_state_dict_new
 
             pre_train_dict = checkpoint["model_state"]
-            model_dict = ms.state_dict()
+            model_dict = get_model_state_dict(ms, is_sharded)
             # Match pre-trained weights that have same shape as current model.
             pre_train_dict_match = {
                 k: v

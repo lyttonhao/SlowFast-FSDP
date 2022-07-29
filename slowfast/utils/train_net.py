@@ -127,7 +127,7 @@ def train_epoch(
 
             # Explicitly declare reduction to mean.
             perform_backward = True
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
 
             if cfg.MODEL.MODEL_NAME == "ContrastiveModel":
                 (
@@ -156,7 +156,6 @@ def train_epoch(
 
         # check Nan Loss.
         misc.check_nan_losses(loss)
-
         if perform_backward:
             scaler.scale(loss).backward()
         # Unscales the gradients of optimizer's assigned params in-place
@@ -567,7 +566,7 @@ def train(cfg):
     logger.info("Train with config:")
     logger.info(pprint.pformat(cfg))
 
-    # Build the video model and print model statistics.
+    # Build the model
     model = build_model(cfg)
 
     # Construct the optimizer.
@@ -575,9 +574,9 @@ def train(cfg):
     if(cfg.FSDP.ENABLED):
         scaler = ShardedGradScaler(enabled=cfg.TRAIN.MIXED_PRECISION)
     else:
-    # Create a GradScaler for mixed precision training
+        # Create a GradScaler for mixed precision training
         scaler = torch.cuda.amp.GradScaler(enabled=cfg.TRAIN.MIXED_PRECISION)
-        
+
     # Load a checkpoint to resume training if applicable.
     if cfg.TRAIN.AUTO_RESUME and cu.has_checkpoint(cfg.OUTPUT_DIR):
         logger.info("Load from last checkpoint.")
@@ -590,6 +589,7 @@ def train(cfg):
                 ddp_wrapped,
                 optimizer,
                 scaler if cfg.TRAIN.MIXED_PRECISION else None,
+                is_sharded=cfg.FSDP.ENABLED
             )
             start_epoch = checkpoint_epoch + 1
         elif "ssl_eval" in cfg.TASK:
@@ -602,6 +602,7 @@ def train(cfg):
                 scaler if cfg.TRAIN.MIXED_PRECISION else None,
                 epoch_reset=True,
                 clear_name_pattern=cfg.TRAIN.CHECKPOINT_CLEAR_NAME_PATTERN,
+                is_sharded=cfg.FSDP.ENABLED
             )
             start_epoch = checkpoint_epoch + 1
         else:
@@ -618,6 +619,7 @@ def train(cfg):
             convert_from_caffe2=cfg.TRAIN.CHECKPOINT_TYPE == "caffe2",
             epoch_reset=cfg.TRAIN.CHECKPOINT_EPOCH_RESET,
             clear_name_pattern=cfg.TRAIN.CHECKPOINT_CLEAR_NAME_PATTERN,
+            is_sharded=cfg.FSDP.ENABLED
         )
         start_epoch = checkpoint_epoch + 1
     else:
@@ -700,7 +702,11 @@ def train(cfg):
                     last_checkpoint = cfg.TRAIN.CHECKPOINT_FILE_PATH
                 logger.info("Load from {}".format(last_checkpoint))
                 cu.load_checkpoint(
-                    last_checkpoint, model, cfg.NUM_GPUS > 1, optimizer
+                    last_checkpoint,
+                    model,
+                    cfg.NUM_GPUS > 1,
+                    optimizer,
+                    is_sharded=cfg.FSDP.ENABLED
                 )
 
         # Shuffle the dataset.

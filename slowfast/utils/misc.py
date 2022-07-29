@@ -2,7 +2,6 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
 
 import json
-import logging
 import math
 import numpy as np
 import os
@@ -46,6 +45,7 @@ class SubmititRunner(submitit.helpers.Checkpointable):
         os.environ["WORLD_SIZE"] = str(job_env.num_tasks)
         setup_distributed(self.cfg_state)
         self.fun(self.cfg_state)
+
 
 def check_nan_losses(loss):
     """
@@ -99,7 +99,7 @@ def cpu_mem_usage():
     return usage, total
 
 
-def _get_model_analysis_input(cfg, use_train_input):
+def _get_model_analysis_input(cfg, use_train_input, device):
     """
     Return a dummy input for model analysis with batch size 1. The input is
         used for analyzing the model (counting flops and activations etc.).
@@ -143,22 +143,17 @@ def _get_model_analysis_input(cfg, use_train_input):
             )
     model_inputs = pack_pathway_output(cfg, input_tensors)
     for i in range(len(model_inputs)):
-        model_inputs[i] = model_inputs[i].unsqueeze(0)
-        if cfg.NUM_GPUS:
-            model_inputs[i] = model_inputs[i].cuda(non_blocking=True)
-
+        model_inputs[i] = model_inputs[i].unsqueeze(0).to(device)
     # If detection is enabled, count flops for one proposal.
     if cfg.DETECTION.ENABLE:
-        bbox = torch.tensor([[0, 0, 1.0, 0, 1.0]])
-        if cfg.NUM_GPUS:
-            bbox = bbox.cuda()
+        bbox = torch.tensor([[0, 0, 1.0, 0, 1.0]]).to(device)
         inputs = (model_inputs, bbox)
     else:
         inputs = (model_inputs,)
     return inputs
 
 
-def get_model_stats(model, cfg, mode, use_train_input):
+def get_model_stats(model, cfg, mode, use_train_input, device='cpu'):
     """
     Compute statistics for the current model given the config.
     Args:
@@ -186,14 +181,14 @@ def get_model_stats(model, cfg, mode, use_train_input):
     # Evaluation mode can avoid getting stuck with sync batchnorm.
     model_mode = model.training
     model.eval()
-    inputs = _get_model_analysis_input(cfg, use_train_input)
+    inputs = _get_model_analysis_input(cfg, use_train_input, device)
     count_dict, *_ = model_stats_fun(model, inputs)
     count = sum(count_dict.values())
     model.train(model_mode)
     return count
 
 
-def log_model_info(model, cfg, use_train_input=True):
+def log_model_info(model, cfg, use_train_input=True, device='cpu'):
     """
     Log info, includes number of parameters, gpu usage, gflops and activation count.
         The model info is computed when the model is in validation mode.
@@ -206,15 +201,16 @@ def log_model_info(model, cfg, use_train_input=True):
     """
     logger.info("Model:\n{}".format(model))
     logger.info("Params: {:,}".format(params_count(model)))
-    logger.info("Mem: {:,} MB".format(gpu_mem_usage()))
+    if(device != 'cpu'):
+        logger.info("Mem: {:,} GB".format(gpu_mem_usage()))
     logger.info(
         "Flops: {:,} G".format(
-            get_model_stats(model, cfg, "flop", use_train_input)
+            get_model_stats(model, cfg, "flop", use_train_input, device)
         )
     )
     logger.info(
         "Activations: {:,} M".format(
-            get_model_stats(model, cfg, "activation", use_train_input)
+            get_model_stats(model, cfg, "activation", use_train_input, device)
         )
     )
     logger.info("nvidia-smi")
@@ -303,6 +299,7 @@ def aggregate_sub_bn_stats(module):
             count += aggregate_sub_bn_stats(child)
     return count
 
+
 def setup_distributed(cfg_state):
     """
     Initialize torch.distributed and set the CUDA device.
@@ -315,10 +312,10 @@ def setup_distributed(cfg_state):
     """
     cfg.defrost()
     cfg.update(**cfg_state)
-    #cfg.freeze()
     local_rank = int(os.environ["LOCAL_RANK"])
     torch.distributed.init_process_group(backend=cfg.DIST_BACKEND)
     torch.cuda.set_device(local_rank)
+
 
 def launch_job(cfg, init_method, func, daemon=False):
     """
