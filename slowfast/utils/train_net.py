@@ -589,6 +589,7 @@ def train(cfg):
                 ddp_wrapped,
                 optimizer,
                 scaler if cfg.TRAIN.MIXED_PRECISION else None,
+                is_sharded=cfg.FSDP.ENABLED
             )
             start_epoch = checkpoint_epoch + 1
         elif "ssl_eval" in cfg.TASK:
@@ -601,6 +602,7 @@ def train(cfg):
                 scaler if cfg.TRAIN.MIXED_PRECISION else None,
                 epoch_reset=True,
                 clear_name_pattern=cfg.TRAIN.CHECKPOINT_CLEAR_NAME_PATTERN,
+                is_sharded=cfg.FSDP.ENABLED
             )
             start_epoch = checkpoint_epoch + 1
         else:
@@ -617,6 +619,7 @@ def train(cfg):
             convert_from_caffe2=cfg.TRAIN.CHECKPOINT_TYPE == "caffe2",
             epoch_reset=cfg.TRAIN.CHECKPOINT_EPOCH_RESET,
             clear_name_pattern=cfg.TRAIN.CHECKPOINT_CLEAR_NAME_PATTERN,
+            is_sharded=cfg.FSDP.ENABLED
         )
         start_epoch = checkpoint_epoch + 1
     else:
@@ -699,7 +702,11 @@ def train(cfg):
                     last_checkpoint = cfg.TRAIN.CHECKPOINT_FILE_PATH
                 logger.info("Load from {}".format(last_checkpoint))
                 cu.load_checkpoint(
-                    last_checkpoint, model, cfg.NUM_GPUS > 1, optimizer
+                    last_checkpoint,
+                    model,
+                    cfg.NUM_GPUS > 1,
+                    optimizer,
+                    is_sharded=cfg.FSDP.ENABLED
                 )
 
         # Shuffle the dataset.
