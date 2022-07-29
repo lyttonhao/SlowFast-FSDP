@@ -99,6 +99,7 @@ def ddp_model(model, cfg, cur_device):
         model: DDP wrapped model
     """
     # Make model replica operate on the current device
+    model = model.cuda(cur_device)
     model = torch.nn.parallel.DistributedDataParallel(
         module=model,
         device_ids=[cur_device],
