@@ -168,4 +168,7 @@ def build_model(cfg, gpu_id=None):
         else:
             model = ddp_model(model, cfg, cur_device)
 
+    if cfg.LOG_MODEL_INFO:
+        logger.info("Mem: {:,} GB".format(misc.gpu_mem_usage()))
+
     return model

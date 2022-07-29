@@ -201,7 +201,8 @@ def log_model_info(model, cfg, use_train_input=True, device='cpu'):
     """
     logger.info("Model:\n{}".format(model))
     logger.info("Params: {:,}".format(params_count(model)))
-    logger.info("Mem: {:,} MB".format(gpu_mem_usage()))
+    if(device != 'cpu'):
+        logger.info("Mem: {:,} GB".format(gpu_mem_usage()))
     logger.info(
         "Flops: {:,} G".format(
             get_model_stats(model, cfg, "flop", use_train_input, device)
