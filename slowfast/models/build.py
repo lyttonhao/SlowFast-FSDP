@@ -141,24 +141,27 @@ def build_model(cfg, gpu_id=None):
         else:
             cur_device = gpu_id
 
-    model_name = cfg.MODEL.MODEL_NAME
-    model = MODEL_REGISTRY.get(model_name)(cfg)
-    if cfg.BN.NORM_TYPE == "sync_batchnorm_apex":
-        try:
-            import apex
-        except ImportError:
-            raise ImportError("APEX is required for this model, pelase install")
+    if not (cfg.FSDP.ENABLED and cfg.FSDP.NESTED_WRAP):
+        model_name = cfg.MODEL.MODEL_NAME
+        model = MODEL_REGISTRY.get(model_name)(cfg)
+        if cfg.BN.NORM_TYPE == "sync_batchnorm_apex":
+            try:
+                import apex
+            except ImportError:
+                raise ImportError("APEX is required for this model, pelase install")
 
-        logger.info("Converting BN layers to Apex SyncBN")
-        process_group = apex.parallel.create_syncbn_process_group(
-            group_size=cfg.BN.NUM_SYNC_DEVICES
-        )
-        model = apex.parallel.convert_syncbn_model(
-            model, process_group=process_group
-        )
+            logger.info("Converting BN layers to Apex SyncBN")
+            process_group = apex.parallel.create_syncbn_process_group(
+                group_size=cfg.BN.NUM_SYNC_DEVICES
+            )
+            model = apex.parallel.convert_syncbn_model(
+                model, process_group=process_group
+            )
+    else:
+        model = None
 
     # NOTE: jit analysis will report incorrect FLOPS if activation ckpt is enabled
-    if du.is_master_proc() and cfg.LOG_MODEL_INFO:
+    if model and du.is_master_proc() and cfg.LOG_MODEL_INFO:
         misc.log_model_info(model, cfg, use_train_input=True, device='cpu')
 
     if cfg.NUM_GPUS > 1:
@@ -170,5 +173,10 @@ def build_model(cfg, gpu_id=None):
 
     if cfg.LOG_MODEL_INFO:
         logger.info("Mem: {:,} GB".format(misc.gpu_mem_usage()))
+        params = misc.params_count(model)
+        if(cfg.FSDP.ENABLED):
+            # Approximate total number of parameters
+            params = params * du.get_world_size()
+        logger.info("Mem: {:,} GB".format(params))
 
     return model
