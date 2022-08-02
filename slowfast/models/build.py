@@ -27,7 +27,7 @@ The call should return a `torch.nn.Module` object.
 """
 
 
-def get_fsdp_params(cfg) -> dict:
+def get_fsdp_args(cfg) -> dict:
     """
     Return FSDP params dict (Assumes usage of fairscale FSDP)
 
@@ -44,11 +44,6 @@ def get_fsdp_params(cfg) -> dict:
     except AttributeError as e:
         logger.exception(f"Configuration error: {e}")
         raise e
-    if cfg.FSDP.AUTO_WRAP:
-        fsdp_params['auto_wrap_policy'] = functools.partial(
-            default_auto_wrap_policy,
-            min_num_params=int(cfg.FSDP.MIN_PARAMS_TO_WRAP)
-        )
 
     return fsdp_params
 
@@ -66,20 +61,23 @@ def fsdp_model(model: torch.nn.Module, cfg: dict, cur_device: torch.device):
         model: FSDP wrapped model
     """
     assert not (cfg.FSDP.AUTO_WRAP and cfg.FSDP.NESTED_WRAP), "FSDP mode: select either AUTO_WRAP or NESTED_WRAP"
-    fsdp_params = get_fsdp_params(cfg)
+    fsdp_args = get_fsdp_args(cfg)
 
     if cfg.FSDP.AUTO_WRAP:
-        with enable_wrap(wrapper_cls=FSDP, **fsdp_params):
+        aw_policy = functools.partial(
+            default_auto_wrap_policy,
+            min_num_params=int(cfg.FSDP.MIN_PARAMS_TO_WRAP)
+        )
+        with enable_wrap(wrapper_cls=FSDP, auto_wrap_policy=aw_policy, **fsdp_args):
             model = auto_wrap(model)
     elif(cfg.FSDP.NESTED_WRAP):
         model_name = cfg.MODEL.MODEL_NAME
-        with enable_wrap(wrapper_cls=FSDP, **fsdp_params):
+        with enable_wrap(wrapper_cls=FSDP, **fsdp_args):
             model = MODEL_REGISTRY.get(model_name)(cfg)
 
     model = FSDP(
             model,
-            reshard_after_forward=cfg.FSDP.RESHARD_AFTER_FW,
-            mixed_precision=cfg.TRAIN.MIXED_PRECISION,
+            **fsdp_args
         )
 
     model = model.cuda(cur_device)
@@ -158,6 +156,7 @@ def build_model(cfg, gpu_id=None):
                 model, process_group=process_group
             )
     else:
+        # Model will be created later with FSDP + NW
         model = None
 
     # NOTE: jit analysis will report incorrect FLOPS if activation ckpt is enabled
