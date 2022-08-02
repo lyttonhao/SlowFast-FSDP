@@ -143,6 +143,7 @@ def build_model(cfg, gpu_id=None):
         model_name = cfg.MODEL.MODEL_NAME
         model = MODEL_REGISTRY.get(model_name)(cfg)
         if cfg.BN.NORM_TYPE == "sync_batchnorm_apex":
+            assert not cfg.FSDP.ENABLED, "sync_batchnorm_apex is not supported with FSDP"
             try:
                 import apex
             except ImportError:
