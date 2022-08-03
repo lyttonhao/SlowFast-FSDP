@@ -55,18 +55,18 @@ def construct_optimizer(model, cfg):
     optim_params = [
         {
             "params": bn_parameters,
-            "weight_decay": cfg.SOLVER.WEIGHT_DECAY if cfg.FSDP.ENABLED else cfg.BN.WEIGHT_DECAY,
+            "weight_decay": cfg.BN.WEIGHT_DECAY,
             "apply_LARS": False,
         },
         {
             "params": non_bn_parameters,
             "weight_decay": cfg.SOLVER.WEIGHT_DECAY,
-            "apply_LARS": False if cfg.FSDP.ENABLED else cfg.SOLVER.LARS_ON,
+            "apply_LARS": cfg.SOLVER.LARS_ON,
         },
         {
             "params": zero_parameters,
-            "weight_decay": cfg.SOLVER.WEIGHT_DECAY if cfg.FSDP.ENABLED else 0.0,
-            "apply_LARS": False if cfg.FSDP.ENABLED else cfg.SOLVER.LARS_ON
+            "weight_decay": 0.0,
+            "apply_LARS": cfg.SOLVER.LARS_ON
         },
     ]
     optim_params = [x for x in optim_params if len(x["params"])]

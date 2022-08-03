@@ -171,12 +171,11 @@ def build_model(cfg, gpu_id=None):
         else:
             model = ddp_model(model, cfg, cur_device)
 
-    if cfg.LOG_MODEL_INFO:
+    if cfg.FSDP.ENABLED and cfg.LOG_MODEL_INFO:
+        #Log actual GPU mem usage and approx. number of parameters
         logger.info("Mem: {:,} GB".format(misc.gpu_mem_usage()))
         params = misc.params_count(model)
-        if(cfg.FSDP.ENABLED):
-            # Approximate total number of parameters
-            params = params * du.get_world_size()
-        logger.info("Mem: {:,} GB".format(params))
+        params = params * du.get_world_size()
+        logger.info("Parameters: {:,}".format(params))
 
     return model
