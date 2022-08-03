@@ -537,6 +537,13 @@ _C.FSDP = CfgNode()
 _C.FSDP.ENABLED = False
 # Enable resharding after the FW pass. This saves memory but tradesoff communication.
 _C.FSDP.RESHARD_AFTER_FW = False
+# Enable nested wrapping in FSDP
+_C.FSDP.NESTED_WRAP = False
+# USE FSDP auto wrapping
+_C.FSDP.AUTO_WRAP = False
+# Minimum number of params to wrap a module.
+_C.FSDP.MIN_PARAMS_TO_WRAP = 1e3
+
 
 
 # -----------------------------------------------------------------------------

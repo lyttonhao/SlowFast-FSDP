@@ -66,7 +66,7 @@ def construct_optimizer(model, cfg):
         {
             "params": zero_parameters,
             "weight_decay": 0.0,
-            "apply_LARS": cfg.SOLVER.LARS_ON,
+            "apply_LARS": cfg.SOLVER.LARS_ON
         },
     ]
     optim_params = [x for x in optim_params if len(x["params"])]
